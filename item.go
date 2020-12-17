@@ -1,5 +1,11 @@
 package d2s
 
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
+
 // Item describes any type of item and all it's data.
 type Item struct {
 	Identified          uint64             `json:"identified"`
@@ -59,20 +65,241 @@ type Item struct {
 	BaseDamage          *WeaponDamage      `json:"base_damage,omitempty"`
 }
 
-func (i *Item) getTypeID() uint64 {
-	if _, ok := armorCodes[i.Type]; ok {
+func (item *Item) getTypeID() uint64 {
+	if _, ok := armorCodes[item.Type]; ok {
 		return armor
 	}
 
-	if _, ok := shieldCodes[i.Type]; ok {
+	if _, ok := shieldCodes[item.Type]; ok {
 		return shield
 	}
 
-	if _, ok := weaponCodes[i.Type]; ok {
+	if _, ok := weaponCodes[item.Type]; ok {
 		return weapon
 	}
 
 	return other
+}
+
+// Name will provice the magical or unique name of the item. This will be blank
+// if the item is not magic in any way.
+func (item *Item) Name() string {
+	if item.IsRuneword() {
+		return item.RunewordName
+	}
+
+	if item.IsUnique() {
+		return item.UniqueName
+	}
+
+	if item.IsMagic() {
+		affixes := make([]string, 4)
+
+		if item.MagicPrefixName != "" {
+			affixes[0] = item.MagicPrefixName
+		}
+
+		affixes[1] = item.TypeName
+
+		if item.MagicSuffixName != "" {
+			affixes[2] = "of"
+			affixes[3] = item.MagicSuffixName
+		}
+
+		return strings.Trim(strings.Join(affixes, " "), " \n\r\t")
+	}
+
+	if item.IsRare() {
+		affixes := make([]string, 2)
+
+		if item.RareName != "" {
+			affixes[0] = item.RareName
+		}
+
+		if item.RareName2 != "" {
+			affixes[1] = item.RareName2
+		}
+
+		return strings.Trim(strings.Join(affixes, " "), " \n\r\t")
+	}
+
+	// TODO: crafted
+
+	return ""
+}
+
+// Typeline will generate a full item type name including quality, sockets, and
+// etherealness if applicable. This type line is similar to that seen in map
+// hacks & loot filters alike.
+func (item *Item) Typeline() string {
+	name := item.TypeName
+
+	if item.IsEthereal() {
+		name = fmt.Sprintf("Etheral %s", name)
+	}
+
+	if item.IsSocketed() && !item.IsRuneword() {
+		name = fmt.Sprintf("Gemmed %s", name)
+	}
+
+	if item.IsSuperior() {
+		name = fmt.Sprintf("Superior %s", name)
+	} else if item.IsLowQuality() {
+		name = fmt.Sprintf("Low Quality %s", name)
+	}
+
+	if item.HasSockets() {
+		name = fmt.Sprintf("%s (%d)", name, item.TotalNrOfSockets)
+	}
+
+	return name
+}
+
+// Runeword will give the runes used to create the runeword. For example, an
+// Enigma would yield `JahIthBer`.
+func (item *Item) Runeword() string {
+	if !item.IsRuneword() {
+		return ""
+	}
+
+	runes := make([]string, item.NrOfItemsInSockets)
+
+	for index, socket := range item.SocketedItems {
+		match, _ := regexp.MatchString("r([0-9]+)", socket.Type)
+
+		if match {
+			runes[index] = strings.Split(socket.Typeline(), " ")[0]
+		}
+	}
+
+	return strings.Join(runes, "")
+}
+
+// IsArmor determines if the item is an armor of some kind (boots, gloves,
+// belt, helm, or body).
+func (item *Item) IsArmor() bool {
+	return armor == item.TypeID
+}
+
+// IsCharm determines if the item is a charm of small, large (medium), or
+// grand (large).
+func (item *Item) IsCharm() bool {
+	return SmallCharm == item.Type ||
+		LargeCharm == item.Type ||
+		GrandCharm == item.Type
+}
+
+// IsShield determines if the item is a shield type.
+func (item *Item) IsShield() bool {
+	return shield == item.TypeID
+}
+
+// IsWeapon determines if the item is any kind of weapon.
+func (item *Item) IsWeapon() bool {
+	return weapon == item.TypeID
+}
+
+// IsMisc determines if the item is any kind of other or misc. item, such as
+// keys, gems, scrolls, potions, runes, jewels, quivers, etc.
+func (item *Item) IsMisc() bool {
+	return other == item.TypeID
+}
+
+// IsLowQuality determines if the item is of low quality.
+func (item *Item) IsLowQuality() bool {
+	return lowQuality == item.Quality
+}
+
+// IsNormal determines if the item is of normal quality.
+func (item *Item) IsNormal() bool {
+	return normal == item.Quality
+}
+
+// IsSuperior determines if the item is of superior quality.
+func (item *Item) IsSuperior() bool {
+	return highQuality == item.Quality
+}
+
+// IsMagic dertermines if the item has magical affixes & properties.
+func (item *Item) IsMagic() bool {
+	return magicallyEnhanced == item.Quality &&
+		(item.MagicPrefix != 0 || item.MagicSuffix != 0)
+}
+
+// IsSetPiece determines if the item belongs to a magic set.
+func (item *Item) IsSetPiece() bool {
+	return partOfSet == item.Quality &&
+		item.SetID != 0 &&
+		item.SetName != ""
+}
+
+// IsRare determines if the item has rare magical affixes & properties.
+func (item *Item) IsRare() bool {
+	return rare == item.Quality &&
+		(item.RareName != "" || item.RareName2 != "")
+}
+
+// IsCrafted determines if the item has crafted magical affixes & properties.
+func (item *Item) IsCrafted() bool {
+	return crafted == item.Quality // TODO: check affixes
+}
+
+// IsUnique determines if the item is a unique legendary item.
+func (item *Item) IsUnique() bool {
+	return unique == item.Quality &&
+		item.UniqueID != 0 &&
+		item.UniqueName != ""
+}
+
+// IsEthereal determines if the item is ethereal.
+func (item *Item) IsEthereal() bool {
+	return item.Ethereal != 0
+}
+
+// IsRuneword determines if the item is a runeword and has runeword properties.
+func (item *Item) IsRuneword() bool {
+	return item.RunewordID != 0 &&
+		item.RunewordName != "" &&
+		item.GivenRuneword != 0
+}
+
+// IsSocketed determines if the item has sockets and has at least 1 socket
+// populated with a gem, rune, or jewel.
+func (item *Item) IsSocketed() bool {
+	return item.HasSockets() && item.NrOfItemsInSockets > 0
+}
+
+// IsSocketing will determine if an item currently resides within the socket of
+// another item.
+func (item *Item) IsSocketing() bool {
+	return socketed == item.LocationID
+}
+
+// HasSockets determines if the item has sockets, empty or not.
+func (item *Item) HasSockets() bool {
+	return item.Socketed != 0 && item.TotalNrOfSockets != 0
+}
+
+// IsEquipped determines if the item is equipped to the character.
+func (item *Item) IsEquipped() bool {
+	return equipped == item.LocationID
+}
+
+// IsEquippedTo determines if the item is equipped to the character at a given
+// item slot on the "paper doll".
+func (item *Item) IsEquippedTo(slot bodySlot) bool {
+	return item.IsEquipped() && slot == bodySlot(item.EquippedID) // TODO: update EquippedID type
+}
+
+// IsCarried determines if the item is within the character's inventory space
+// (though **not** equipped).
+func (item *Item) IsCarried() bool {
+	return stored == item.LocationID && item.AltPositionID == 0x01
+}
+
+// IsStashed determines if the item is stored in the character's stash.
+func (item *Item) IsStashed() bool {
+	return stored == item.LocationID && item.AltPositionID == 0x05
 }
 
 // Item code value constant used as an internal reference or "ID".
@@ -733,6 +960,9 @@ const (
 	Zweihander          string = "9fb"
 )
 
+// Describes an equipment slot on the player paper doll.
+type bodySlot uint64
+
 // Attributes that only exists on a player ear.
 type earAttributes struct {
 	Class uint64 `json:"class"`
@@ -1114,6 +1344,22 @@ const (
 	belt     = 0x02
 	cursor   = 0x04
 	socketed = 0x06
+)
+
+// Equipment location ID.
+const (
+	Head          bodySlot = 1
+	Neck          bodySlot = 2
+	Body          bodySlot = 3
+	LeftHand      bodySlot = 4
+	RightHand     bodySlot = 5
+	LeftFinger    bodySlot = 6 // TODO: check this
+	RightFinger   bodySlot = 7 // TODO: check this
+	Waist         bodySlot = 8
+	Feet          bodySlot = 9
+	Hands         bodySlot = 10
+	LeftHandSwap  bodySlot = 11
+	RightHandSwap bodySlot = 12
 )
 
 // Rarity IDs.
